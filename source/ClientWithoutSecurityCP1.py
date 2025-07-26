@@ -200,16 +200,23 @@ def main(args):
                 data = fp.read()
                 original_file_size = len(data)
                 encrypted_blocks = encrypt_file_in_blocks_oaep(filename, server_public_key)
+                encrypted_filename = "enc_"+filename.split("/")[-1]
+            
+            with open(f"send_files_enc/{encrypted_filename}", mode="wb") as fp:
+                for block in encrypted_blocks:
+                    fp.write(block)
+            
+            print(f"Encrypted file saved")
             
                 # Send encrypted file data (MODE = 1)
-                s.sendall(convert_int_to_bytes(1))  
-                s.sendall(convert_int_to_bytes(original_file_size))  # M1 = original file size
+            s.sendall(convert_int_to_bytes(1))  
+            s.sendall(convert_int_to_bytes(original_file_size))  # M1 = original file size
                 
                 # Send each encrypted block
-                for encrypted_block in encrypted_blocks:
-                    s.sendall(encrypted_block)  # M2 = encrypted file data blocks (128 bytes each)
+            for encrypted_block in encrypted_blocks:
+                s.sendall(encrypted_block)  # M2 = encrypted file data blocks (128 bytes each)
                 
-                print(f"Sent file with {len(encrypted_blocks)} encrypted blocks, original size: {original_file_size} bytes")
+            print(f"Sent file with {len(encrypted_blocks)} encrypted blocks, original size: {original_file_size} bytes")
             # Close the connection
         s.sendall(convert_int_to_bytes(2))
         print("Closing connection...")

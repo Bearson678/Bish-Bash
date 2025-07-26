@@ -76,12 +76,20 @@ def main(args):
                             print(f"Original file size: {original_file_size} bytes")
                             
                             BLOCK_SIZE = 62
-                            num_blocks = (original_file_size + BLOCK_SIZE-1)
+                            num_blocks = (original_file_size + BLOCK_SIZE-1)//BLOCK_SIZE
                             print(f"Expecting {num_blocks} blocks")
                             decrypted_data = b''
+                            encrypted_file_data = b''  # Store encrypted data for saving
+                            
                             for block_num in range(num_blocks):
-                                encrypted_block = read_bytes(client_socket,128)
+                                print(f"Reading block {block_num + 1}/{num_blocks}")
+                                
+                                # Read one encrypted block (128 bytes)
+                                encrypted_block = read_bytes(client_socket, 128)
+                                encrypted_file_data += encrypted_block  # Store for encrypted file
+                                
                                 try:
+                                    # Decrypt the block using OAEP
                                     decrypted_block = private_key.decrypt(
                                         encrypted_block,
                                         padding.OAEP(
@@ -98,6 +106,11 @@ def main(args):
                             recv_filename = "recv_" + filename.split("/")[-1]
                             with open(f"recv_files/{recv_filename}", mode="wb") as fp:
                                 fp.write(decrypted_data)
+                            
+                            enc_filename = "enc_"+ filename.split("/")[-1]
+                            
+                            with open(f"recv_files_enc/{enc_filename}", mode="wb") as fp:
+                                fp.write(encrypted_file_data)
                             
                             print(f"Successfully decrypted and saved: {recv_filename}")
                             print(f"Decrypted size: {len(decrypted_data)} bytes")
