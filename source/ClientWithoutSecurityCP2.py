@@ -120,7 +120,24 @@ def main(args):
                 print("[AUTH SUCCESS] Server identity verified.\n")
                 server_public_key = server_cert.public_key()
                 #assert server_cert.not_valid_before <= datetime.utcnow() <= server_cert.not_valid_after
-                
+                session_key = Fernet.generate_key()
+                fernet = Fernet(session_key)
+
+                # MODE 4: SEND ENCRYPTED SESSION KEY
+                encrypted_session_key = server_public_key.encrypt(
+                    session_key,
+                    padding.OAEP(
+                        mgf=padding.MGF1(algorithm=hashes.SHA256()),
+                        algorithm=hashes.SHA256(),
+                        label=None
+                    )
+                )
+
+                s.sendall(convert_int_to_bytes(4))
+                s.sendall(convert_int_to_bytes(len(encrypted_session_key)))
+                s.sendall(encrypted_session_key)
+                print("[MODE 4] Session key sent")
+
                 #DECRYPTION OF AUTHENTICATED MESSAGE
                 server_public_key.verify(signed_message,authentication_message,
                     padding.PSS(
@@ -194,29 +211,25 @@ def main(args):
             s.sendall(convert_int_to_bytes(len(filename_bytes)))
             s.sendall(filename_bytes)
 
-            #Encrypt this part under CP1
-            # Send the file
+            #CP2
             with open(filename, mode="rb") as fp:
-                data = fp.read()
-                original_file_size = len(data)
-                encrypted_blocks = encrypt_file_in_blocks_oaep(filename, server_public_key)
-                encrypted_filename = "enc_"+filename.split("/")[-1]
-            
+                file_data = fp.read()
+
+            encrypted_data = fernet.encrypt(file_data)  # fernet created during MODE 4
+
+            # Optional: Save encrypted file locally
+            encrypted_filename = "enc_" + filename.split("/")[-1]
             with open(f"send_files_enc/{encrypted_filename}", mode="wb") as fp:
-                for block in encrypted_blocks:
-                    fp.write(block)
-            
-            print(f"Encrypted file saved")
-            
-                # Send encrypted file data (MODE = 1)
+                fp.write(encrypted_data)
+
+            print("Encrypted file saved")
+
+            # Send encrypted file data (MODE = 1)
             s.sendall(convert_int_to_bytes(1))  
-            s.sendall(convert_int_to_bytes(original_file_size))  # M1 = original file size
+            s.sendall(convert_int_to_bytes(len(encrypted_data)))  # M1 = encrypted file size
+            s.sendall(encrypted_data)  # M2 = encrypted file content
                 
-                # Send each encrypted block
-            for encrypted_block in encrypted_blocks:
-                s.sendall(encrypted_block)  # M2 = encrypted file data blocks (128 bytes each)
-                
-            print(f"Sent file with {len(encrypted_blocks)} encrypted blocks, original size: {original_file_size} bytes")
+            print(f"Sent encrypted file of size {len(encrypted_data)} bytes (original size: {len(file_data)} bytes)")
             # Close the connection
         s.sendall(convert_int_to_bytes(2))
         print("Closing connection...")
