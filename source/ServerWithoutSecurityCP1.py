@@ -130,16 +130,24 @@ def main(args):
                             #READ THE MODE 3 GIVEN BY CLIENT
 
                             msg_len = convert_bytes_to_int(read_bytes(client_socket,8))
-                            authentication_message = read_bytes(client_socket,msg_len)
+                            nonce_message = read_bytes(client_socket,msg_len)
+                            nonce = nonce_message[:-8]
+                            timestamp_bytes = nonce_message[-8:]
+                            timestamp_int = int.from_bytes(timestamp_bytes, 'big')
+                            
+                            now = int(time.time())
+                            if abs(now - timestamp_int) > 300:
+                                print(f"[AUTH FAILURE] Timestamp {timestamp_int} out of range (now={now}). Closing connection.")
+                                client_socket.close()
+                                return
 
                             #LOADING PRIVATE KEY
                             with open("source/auth/server_private_key.pem", mode="rb") as key_file:
                                 private_key = serialization.load_pem_private_key(bytes(key_file.read()), password=None)
-                                public_key = private_key.public_key()
                                 
                             #SIGN MESSAGE WITH PSS 
                             signature = private_key.sign(
-                                authentication_message,
+                                nonce_message,
                                 padding.PSS(mgf=padding.MGF1(hashes.SHA256()),salt_length=padding.PSS.MAX_LENGTH,),
                                 hashes.SHA256(),
                             )
@@ -154,57 +162,7 @@ def main(args):
                             client_socket.sendall(convert_int_to_bytes(len(cert_data)))
                             client_socket.sendall(cert_data)
                             print("Server certificate begins with:\n", cert_data[:50])
-                            print("[MODE 3] Authentication data sent to client.")
-                            
-                            
-                            #SEND A AUTH MESSAGE TO AUTH CLIENT
-                            server_challenge = secrets.token_bytes(32)
-                            
-                            #SEND M1 and M2
-                            client_socket.sendall(convert_int_to_bytes(len(server_challenge)))
-                            client_socket.sendall(server_challenge)
-                            
-                            signed_challenge_len = convert_bytes_to_int(read_bytes(client_socket,8))
-                            signed_challenge = read_bytes(client_socket,signed_challenge_len)
-
-                            client_cert_len = convert_bytes_to_int(read_bytes(client_socket,8))
-                            client_cert_raw = read_bytes(client_socket,client_cert_len)
-                            
-                            try:
-                                with open("source/auth/cacsertificate.crt","rb") as f:
-                                    ca_cert_raw = f.read()
-                                    ca_cert = x509.load_pem_x509_certificate(
-                                        data=ca_cert_raw, backend=default_backend()
-                                        )
-                                    ca_public_key = ca_cert.public_key()
-                                    
-                                client_cert = x509.load_pem_x509_certificate(client_cert_raw, default_backend())
-                                ca_public_key.verify(
-                                    signature=client_cert.signature, # signature bytes to  verify
-                                    data=client_cert.tbs_certificate_bytes, # certificate data bytes that was signed by CA
-                                    padding=padding.PKCS1v15(), # padding used by CA bot to sign the the server's csr
-                                    algorithm=client_cert.signature_hash_algorithm,
-                                    )
-                                
-                                client_public_key = client_cert.public_key()
-                                client_public_key.verify(signed_challenge,server_challenge,
-                                    padding.PSS(
-                                    mgf=padding.MGF1(hashes.SHA256()),
-                                    salt_length=padding.PSS.MAX_LENGTH,
-                                    ),
-                                    hashes.SHA256(),
-                                    )
-                                
-                                print("[AUTH SUCCESS] Client identity verified.")
-
-                            except InvalidSignature:
-                                print("[AUTH FAILURE] Client signature verification failed. Closing connection.")
-                                client_socket.close()
-                                return
-                            except Exception as e:
-                                print("[AUTH ERROR]", e)
-                                client_socket.close()
-                                return               
+                            print("[MODE 3] Authentication data sent to client.")       
                             
 
 

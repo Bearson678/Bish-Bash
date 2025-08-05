@@ -42,15 +42,21 @@ def main(args):
         print("Connected")
         print("Generating auth message...", flush=True)
 
-        authentication_message = secrets.token_bytes(32)
+        nonce = secrets.token_bytes(32) # we are sending a nonce to ensure that server is alive
+        
+        timestamp_int = int(datetime.now().timestamp())
 
+        # pack timestamp int as 8-byte big endian
+        timestamp_bytes = timestamp_int.to_bytes(8, 'big')
+        
+        nonce_message = nonce + timestamp_bytes
         print("Sending mode 3...", flush=True)
         s.sendall(convert_int_to_bytes(3))
         print("Sent mode 3", flush=True)
-        s.sendall(convert_int_to_bytes(len(authentication_message)))
-        s.sendall(authentication_message)
+        s.sendall(convert_int_to_bytes(len(nonce_message)))
+        s.sendall(nonce_message)
 
-        #ACCEPTING SIGNED MESSAGE FROM SERVER
+        #ACCEPTING SIGNED NONCE FROM SERVER
         m1_bytes_signed = s.recv(8)
         signed_len = convert_bytes_to_int(m1_bytes_signed)
         signed_message = b""
@@ -86,8 +92,8 @@ def main(args):
                 server_public_key = server_cert.public_key()
                 #assert server_cert.not_valid_before <= datetime.utcnow() <= server_cert.not_valid_after
                 
-                #DECRYPTION OF AUTHENTICATED MESSAGE
-                server_public_key.verify(signed_message,authentication_message,
+                #DECRYPTION OF NONCE MESSAGE
+                server_public_key.verify(signed_message,nonce_message,
                     padding.PSS(
                     mgf=padding.MGF1(hashes.SHA256()),
                     salt_length=padding.PSS.MAX_LENGTH,
@@ -106,37 +112,7 @@ def main(args):
             s.sendall(convert_int_to_bytes(2))
             return
 
-        print("starting to send client challenge to server...\n")
-        
-        
-        #send client challenge to server
-        challenge_len_bytes = s.recv(8)
-        challenge_len = convert_bytes_to_int(challenge_len_bytes)
-        server_challenge = b""
-        while len(server_challenge)<challenge_len:
-            server_challenge += s.recv(challenge_len-len(server_challenge))
-            
-        #Load client private key
-        with open("source/auth/client_private_key.pem", "rb") as key_file:
-            client_private_key = serialization.load_pem_private_key(key_file.read(), password=None)
-        
-        
-        signed_challenge = client_private_key.sign(server_challenge,
-            padding.PSS(
-            mgf=padding.MGF1(hashes.SHA256()),
-            salt_length=padding.PSS.MAX_LENGTH,
-            ),
-            hashes.SHA256(),
-            )
-        
-        s.sendall(convert_int_to_bytes(len(signed_challenge)))
-        s.sendall(signed_challenge)
-        
-        with open("source/auth/client_signed.crt","rb") as f:
-            client_cert = f.read()
-            
-        s.send(convert_int_to_bytes(len(client_cert)))
-        s.sendall(client_cert)
+        print("SERVER IS AUTHENTICATED\n")
         
         
         
