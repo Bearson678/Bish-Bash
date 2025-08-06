@@ -14,8 +14,6 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding
 from cryptography.hazmat.backends import default_backend
 
-session_key = None
-fernet = None
 
 def convert_int_to_bytes(x):
     """
@@ -70,35 +68,41 @@ def main(args):
                             ).decode("utf-8")
                             # print(filename)
                         case 1:
+                            # If the packet is for transferring a chunk of the file
                             start_time = time.time()
 
-                            # Receive M1: encrypted file size
-                            encrypted_data_len = convert_bytes_to_int(read_bytes(client_socket, 8))
-                            print(f"[MODE 1] Receiving encrypted file of size: {encrypted_data_len} bytes")
+                            decrypted_data = b''
+                            encrypted_file_data = b''
 
-                            # Receive M2: encrypted file content
-                            encrypted_data = read_bytes(client_socket, encrypted_data_len)
+                            total_received = 0
+                            while total_received < original_file_size:
+                                # Read block length (M2 format changed in CP2)
+                                block_len = convert_bytes_to_int(read_bytes(client_socket, 8))
 
-                            # Save the encrypted file for reference
-                            enc_filename = "enc_" + filename.split("/")[-1]
-                            with open(f"recv_files_enc/{enc_filename}", mode="wb") as fp:
-                                fp.write(encrypted_data)
+                                # Read the actual encrypted block
+                                encrypted_block = read_bytes(client_socket, block_len)
+                                encrypted_file_data += encrypted_block
+                                try:
+                                    decrypted_block = fernet.decrypt(encrypted_block)
+                                    decrypted_data += decrypted_block
+                                    total_received += len(decrypted_block)
+                                except Exception as e:
+                                    print(f"Error decrypting block: {e}")
+                                    break
 
-                            # Decrypt using Fernet
-                            try:
-                                decrypted_data = fernet.decrypt(encrypted_data)
-                            except Exception as e:
-                                print(f"Error decrypting file with Fernet: {e}")
-                                break
-
-                            # Save decrypted file
+                            decrypted_data = decrypted_data[:original_file_size]
                             recv_filename = "recv_" + filename.split("/")[-1]
                             with open(f"recv_files/{recv_filename}", mode="wb") as fp:
                                 fp.write(decrypted_data)
-
-                            print(f"Successfully received and decrypted file: {recv_filename}")
-                            print(f"Decrypted size: {len(decrypted_data)} bytes (Encrypted size: {len(encrypted_data)} bytes)")
-                            print(f"Finished receiving file in {time.time() - start_time:.2f}s")
+                            
+                            enc_filename = "enc_"+ filename.split("/")[-1]
+                            
+                            with open(f"recv_files_enc/{enc_filename}", mode="wb") as fp:
+                                fp.write(encrypted_file_data)
+                            
+                            print(f"Successfully decrypted and saved: {recv_filename}")
+                            print(f"Decrypted size: {len(decrypted_data)} bytes")
+                            print(f"Finished receiving file in {(time.time() - start_time)}s!")
                             
 
                         case 2:
@@ -114,16 +118,16 @@ def main(args):
                             #READ THE MODE 3 GIVEN BY CLIENT
 
                             msg_len = convert_bytes_to_int(read_bytes(client_socket,8))
-                            authentication_message = read_bytes(client_socket,msg_len)
+                            nonce_message = read_bytes(client_socket,msg_len)
+                            
 
                             #LOADING PRIVATE KEY
                             with open("source/auth/server_private_key.pem", mode="rb") as key_file:
                                 private_key = serialization.load_pem_private_key(bytes(key_file.read()), password=None)
-                                public_key = private_key.public_key()
                                 
                             #SIGN MESSAGE WITH PSS 
                             signature = private_key.sign(
-                                authentication_message,
+                                nonce_message,
                                 padding.PSS(mgf=padding.MGF1(hashes.SHA256()),salt_length=padding.PSS.MAX_LENGTH,),
                                 hashes.SHA256(),
                             )
@@ -139,73 +143,27 @@ def main(args):
                             client_socket.sendall(cert_data)
                             print("Server certificate begins with:\n", cert_data[:50])
                             print("[MODE 3] Authentication data sent to client.")
-                            
-                            
-                            #SEND A AUTH MESSAGE TO AUTH CLIENT
-                            server_challenge = secrets.token_bytes(32)
-                            
-                            #SEND M1 and M2
-                            client_socket.sendall(convert_int_to_bytes(len(server_challenge)))
-                            client_socket.sendall(server_challenge)
-                            
-                            signed_challenge_len = convert_bytes_to_int(read_bytes(client_socket,8))
-                            signed_challenge = read_bytes(client_socket,signed_challenge_len)
-
-                            client_cert_len = convert_bytes_to_int(read_bytes(client_socket,8))
-                            client_cert_raw = read_bytes(client_socket,client_cert_len)
-                            
-                            try:
-                                with open("source/auth/cacsertificate.crt","rb") as f:
-                                    ca_cert_raw = f.read()
-                                    ca_cert = x509.load_pem_x509_certificate(
-                                        data=ca_cert_raw, backend=default_backend()
-                                        )
-                                    ca_public_key = ca_cert.public_key()
-                                    
-                                client_cert = x509.load_pem_x509_certificate(client_cert_raw, default_backend())
-                                ca_public_key.verify(
-                                    signature=client_cert.signature, # signature bytes to  verify
-                                    data=client_cert.tbs_certificate_bytes, # certificate data bytes that was signed by CA
-                                    padding=padding.PKCS1v15(), # padding used by CA bot to sign the the server's csr
-                                    algorithm=client_cert.signature_hash_algorithm,
-                                    )
-                                
-                                client_public_key = client_cert.public_key()
-                                client_public_key.verify(signed_challenge,server_challenge,
-                                    padding.PSS(
-                                    mgf=padding.MGF1(hashes.SHA256()),
-                                    salt_length=padding.PSS.MAX_LENGTH,
-                                    ),
-                                    hashes.SHA256(),
-                                    )
-                                
-                                print("[AUTH SUCCESS] Client identity verified.")
-
-                            except InvalidSignature:
-                                print("[AUTH FAILURE] Client signature verification failed. Closing connection.")
-                                client_socket.close()
-                                return
-                            except Exception as e:
-                                print("[AUTH ERROR]", e)
-                                client_socket.close()
-                                return
 
                         case 4:
                             print("[MODE 4] Receiving encrypted session key...")
-                            enc_key_len = convert_bytes_to_int(read_bytes(client_socket, 8))
-                            enc_session_key = read_bytes(client_socket, enc_key_len)
 
+                            encrypted_len = convert_bytes_to_int(read_bytes(client_socket, 8))
+                            encrypted_session_key = read_bytes(client_socket, encrypted_len)
+
+                            # Decrypt Fernet session key
                             session_key = private_key.decrypt(
-                            enc_session_key,
+                                encrypted_session_key,
                                 padding.OAEP(
-                                    mgf=padding.MGF1(hashes.SHA256()),
+                                    mgf=padding.MGF1(algorithm=hashes.SHA256()),
                                     algorithm=hashes.SHA256(),
-                                    label=None
+                                    label=None,
                                 )
                             )
                             fernet = Fernet(session_key)
-                            print("[MODE 4] Session key established")               
+                            print("[MODE 4] Session key received and decrypted.")
                             
+
+
     except Exception as e:
         print(e)
         s.close()

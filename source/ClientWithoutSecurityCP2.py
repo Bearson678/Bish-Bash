@@ -77,15 +77,21 @@ def main(args):
         print("Connected")
         print("Generating auth message...", flush=True)
 
-        authentication_message = secrets.token_bytes(32)
+        nonce = secrets.token_bytes(32) # we are sending a nonce to ensure that server is alive
+        
+        timestamp_int = int(datetime.now().timestamp())
 
+        # pack timestamp int as 8-byte big endian
+        timestamp_bytes = timestamp_int.to_bytes(8, 'big')
+        
+        nonce_message = nonce + timestamp_bytes
         print("Sending mode 3...", flush=True)
         s.sendall(convert_int_to_bytes(3))
         print("Sent mode 3", flush=True)
-        s.sendall(convert_int_to_bytes(len(authentication_message)))
-        s.sendall(authentication_message)
+        s.sendall(convert_int_to_bytes(len(nonce_message)))
+        s.sendall(nonce_message)
 
-        #ACCEPTING SIGNED MESSAGE FROM SERVER
+        #ACCEPTING SIGNED NONCE FROM SERVER
         m1_bytes_signed = s.recv(8)
         signed_len = convert_bytes_to_int(m1_bytes_signed)
         signed_message = b""
@@ -101,14 +107,14 @@ def main(args):
             server_cert_raw += s.recv(cert_len-len(server_cert_raw))
         
         try:
-            #GET PUBLIC KEY FROM CACSERTIFICATE.CRT
+            #GET PUBLIC KEY FROM CACSERTIFICATE.CRT, SHOULD BE PUBLIC KNOWLEDGE ALREADY
             with open("source/auth/cacsertificate.crt","rb") as f:
                 ca_cert_raw = f.read()
                 ca_cert = x509.load_pem_x509_certificate(
     data=ca_cert_raw, backend=default_backend()
 )
                 ca_public_key = ca_cert.public_key()
-                #VERIFY SERVER CERT
+                #VERIFY SERVER CERT THAT WE RECEIVED
                 server_cert = x509.load_pem_x509_certificate(data=server_cert_raw, backend=default_backend())
 
                 ca_public_key.verify(
@@ -120,26 +126,9 @@ def main(args):
                 print("[AUTH SUCCESS] Server identity verified.\n")
                 server_public_key = server_cert.public_key()
                 #assert server_cert.not_valid_before <= datetime.utcnow() <= server_cert.not_valid_after
-                session_key = Fernet.generate_key()
-                fernet = Fernet(session_key)
-
-                # MODE 4: SEND ENCRYPTED SESSION KEY
-                encrypted_session_key = server_public_key.encrypt(
-                    session_key,
-                    padding.OAEP(
-                        mgf=padding.MGF1(algorithm=hashes.SHA256()),
-                        algorithm=hashes.SHA256(),
-                        label=None
-                    )
-                )
-
-                s.sendall(convert_int_to_bytes(4))
-                s.sendall(convert_int_to_bytes(len(encrypted_session_key)))
-                s.sendall(encrypted_session_key)
-                print("[MODE 4] Session key sent")
-
-                #DECRYPTION OF AUTHENTICATED MESSAGE
-                server_public_key.verify(signed_message,authentication_message,
+                
+                #DECRYPTION OF NONCE MESSAGE
+                server_public_key.verify(signed_message,nonce_message,
                     padding.PSS(
                     mgf=padding.MGF1(hashes.SHA256()),
                     salt_length=padding.PSS.MAX_LENGTH,
@@ -158,39 +147,23 @@ def main(args):
             s.sendall(convert_int_to_bytes(2))
             return
 
-        print("starting to send client challenge to server...\n")
+        print("SERVER IS AUTHENTICATED\n")
         
-        
-        #send client challenge to server
-        challenge_len_bytes = s.recv(8)
-        challenge_len = convert_bytes_to_int(challenge_len_bytes)
-        server_challenge = b""
-        while len(server_challenge)<challenge_len:
-            server_challenge += s.recv(challenge_len-len(server_challenge))
-            
-        #Load client private key
-        with open("source/auth/client_private_key.pem", "rb") as key_file:
-            client_private_key = serialization.load_pem_private_key(key_file.read(), password=None)
-        
-        
-        signed_challenge = client_private_key.sign(server_challenge,
-            padding.PSS(
-            mgf=padding.MGF1(hashes.SHA256()),
-            salt_length=padding.PSS.MAX_LENGTH,
-            ),
-            hashes.SHA256(),
+        session_key = Fernet.generate_key()
+        fernet = Fernet(session_key)
+
+        encrypted_session_key = server_public_key.encrypt(
+            session_key,
+            padding.OAEP(
+                mgf=padding.MGF1(algorithm=hashes.SHA256()),
+                algorithm=hashes.SHA256(),
+                label=None,
             )
-        
-        s.sendall(convert_int_to_bytes(len(signed_challenge)))
-        s.sendall(signed_challenge)
-        
-        with open("source/auth/client_signed.crt","rb") as f:
-            client_cert = f.read()
-            
-        s.send(convert_int_to_bytes(len(client_cert)))
-        s.sendall(client_cert)
-        
-        
+        )
+
+        s.sendall(convert_int_to_bytes(4))  # MODE 4
+        s.sendall(convert_int_to_bytes(len(encrypted_session_key)))  # M1
+        s.sendall(encrypted_session_key)  # M2
         
         while True:
             filename = input(
@@ -211,25 +184,38 @@ def main(args):
             s.sendall(convert_int_to_bytes(len(filename_bytes)))
             s.sendall(filename_bytes)
 
-            #CP2
+            #Encrypt this part under CP1
+            # Send the file
             with open(filename, mode="rb") as fp:
-                file_data = fp.read()
+                data = fp.read()
+                original_file_size = len(data)
+                encrypted_filename = "enc_"+filename.split("/")[-1]
 
-            encrypted_data = fernet.encrypt(file_data)  # fernet created during MODE 4
-
-            # Optional: Save encrypted file locally
-            encrypted_filename = "enc_" + filename.split("/")[-1]
+            # Break the file into blocks and encrypt each with Fernet
+            block_size = 128  # You can adjust block size
+            encrypted_blocks = []
+            for i in range(0, len(data), block_size):
+                block = data[i:i+block_size]
+                encrypted_block = fernet.encrypt(block)
+                encrypted_blocks.append(encrypted_block)
+            
             with open(f"send_files_enc/{encrypted_filename}", mode="wb") as fp:
-                fp.write(encrypted_data)
+                for block in encrypted_blocks:
+                    fp.write(block)
+            
+            print(f"Encrypted file saved")
+            
+                # Send encrypted file data (MODE = 1)
+            s.sendall(convert_int_to_bytes(1))  # MODE 1
+            s.sendall(convert_int_to_bytes(original_file_size))  # M1 = original file size
 
-            print("Encrypted file saved")
+            for encrypted_block in encrypted_blocks:
+                # Send each encrypted block prefixed with its length
+                s.sendall(convert_int_to_bytes(len(encrypted_block)))  # send length of block
+                s.sendall(encrypted_block)  # send actual encrypted data
 
-            # Send encrypted file data (MODE = 1)
-            s.sendall(convert_int_to_bytes(1))  
-            s.sendall(convert_int_to_bytes(len(encrypted_data)))  # M1 = encrypted file size
-            s.sendall(encrypted_data)  # M2 = encrypted file content
                 
-            print(f"Sent encrypted file of size {len(encrypted_data)} bytes (original size: {len(file_data)} bytes)")
+            print(f"Sent file with {len(encrypted_blocks)} encrypted blocks, original size: {original_file_size} bytes")
             # Close the connection
         s.sendall(convert_int_to_bytes(2))
         print("Closing connection...")
