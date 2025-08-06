@@ -101,15 +101,7 @@ def main(args):
 
                             msg_len = convert_bytes_to_int(read_bytes(client_socket,8))
                             nonce_message = read_bytes(client_socket,msg_len)
-                            nonce = nonce_message[:-8]
-                            timestamp_bytes = nonce_message[-8:]
-                            timestamp_int = int.from_bytes(timestamp_bytes, 'big')
-                            
-                            now = int(time.time())
-                            if abs(now - timestamp_int) > 300:
-                                print(f"[AUTH FAILURE] Timestamp {timestamp_int} out of range (now={now}). Closing connection.")
-                                client_socket.close()
-                                return
+
 
                             #LOADING PRIVATE KEY
                             with open("source/auth/server_private_key.pem", mode="rb") as key_file:

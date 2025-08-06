@@ -107,14 +107,14 @@ def main(args):
             server_cert_raw += s.recv(cert_len-len(server_cert_raw))
         
         try:
-            #GET PUBLIC KEY FROM CACSERTIFICATE.CRT
+            #GET PUBLIC KEY FROM CACSERTIFICATE.CRT, SHOULD BE PUBLIC KNOWLEDGE ALREADY
             with open("source/auth/cacsertificate.crt","rb") as f:
                 ca_cert_raw = f.read()
                 ca_cert = x509.load_pem_x509_certificate(
     data=ca_cert_raw, backend=default_backend()
 )
                 ca_public_key = ca_cert.public_key()
-                #VERIFY SERVER CERT
+                #VERIFY SERVER CERT THAT WE RECEIVED
                 server_cert = x509.load_pem_x509_certificate(data=server_cert_raw, backend=default_backend())
 
                 ca_public_key.verify(
