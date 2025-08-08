@@ -12,6 +12,7 @@ from cryptography.fernet import Fernet
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding
 from cryptography.hazmat.backends import default_backend
+from translations import translations
 
 
 def convert_int_to_bytes(x):
@@ -43,6 +44,34 @@ def read_bytes(socket, length):
 
     return b"".join(buffer)
 
+def select_language(supported_languages=None):
+    if supported_languages is None:
+        supported_languages = ['en', 'zh']
+
+    print("Select your language:")
+    for idx, code in enumerate(supported_languages, 1):
+        print(f"{idx}. {code}")
+
+    while True:
+        choice = input("Enter number or language code (e.g. 1 or 'en'): ").strip().lower()
+        print()
+
+
+        if choice.isdigit():
+            idx = int(choice) - 1
+            if 0 <= idx < len(supported_languages):
+                return supported_languages[idx]
+        elif choice in supported_languages:
+            return choice
+
+        print("Invalid input. Please try again.")
+
+def _(text):
+    return translations.get(lang, {}).get(text, text)
+
+
+lang = select_language()
+
 
 def main(args):
     port = int(args[0]) if len(args) > 0 else 4321
@@ -59,7 +88,7 @@ def main(args):
                     match convert_bytes_to_int(read_bytes(client_socket, 8)):
                         case 0:
                             # If the packet is for transferring the filename
-                            print("Receiving file...")
+                            print(_("Receiving File"))
                             filename_len = convert_bytes_to_int(
                                 read_bytes(client_socket, 8)
                             )
@@ -84,18 +113,16 @@ def main(args):
                                 f"recv_files/{filename}", mode="wb"
                             ) as fp:
                                 fp.write(file_data)
-                            print(
-                                f"Finished receiving file in {(time.time() - start_time)}s!"
-                            )
+                                print(_("Finished Receiving File") +f"{(time.time() - start_time)}s!")
                         case 2:
                             # Close the connection
                             # Python context used here so no need to explicitly close the socket
-                            print("Closing connection...")
+                            print(_("Closing Connection"))
                             s.close()
                             break
 
                         case 3:
-                            print("[MODE3] Starting authentication handshake...")
+                            print(_("Start Handshake"))
 
                             #READ THE MODE 3 GIVEN BY CLIENT
 
@@ -123,8 +150,8 @@ def main(args):
                                 cert_data = f.read()
                             client_socket.sendall(convert_int_to_bytes(len(cert_data)))
                             client_socket.sendall(cert_data)
-                            print("Server certificate begins with:\n", cert_data[:50])
-                            print("[MODE 3] Authentication data sent to client.")
+                            print(_("Server Certificate") + f"\n", cert_data[:50])
+                            print(_("Authetication"))    
                             
 
 
@@ -134,7 +161,7 @@ def main(args):
 
 def handler(signal_received, frame):
     # Handle any cleanup here
-    print('SIGINT or CTRL-C detected. Exiting gracefully')
+    print(_("Exiting"))
     exit(0)
     
 if __name__ == "__main__":

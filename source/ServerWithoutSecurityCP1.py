@@ -6,6 +6,8 @@ import time
 from datetime import datetime
 import secrets
 import traceback
+import zipfile
+from io import BytesIO
 from signal import signal, SIGINT
 from cryptography import x509
 from cryptography.exceptions import InvalidSignature
@@ -13,6 +15,7 @@ from cryptography.fernet import Fernet
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding
 from cryptography.hazmat.backends import default_backend
+from translations import translations
 
 
 def convert_int_to_bytes(x):
@@ -44,7 +47,54 @@ def read_bytes(socket, length):
 
     return b"".join(buffer)
 
+
+def unzip_from_bytes(zip_bytes):
+    extracted_files = {}
+    with zipfile.ZipFile(BytesIO(zip_bytes)) as zf:
+        for name in zf.namelist():
+            with zf.open(name) as file:
+                extracted_files[name] = file.read() 
+    return extracted_files
+
+
+def print_progress_bar(current, total, block_num, total_blocks, bar_length=40):
+    percent = current / total
+    filled_length = int(bar_length * percent)
+    bar = '=' * filled_length + ' ' * (bar_length - filled_length)
+    sys.stdout.write(f'\rProgress: [{bar}] {percent*100:.1f}% Reading block {block_num}/{total_blocks}')
+    sys.stdout.flush()
+
+def select_language(supported_languages=None):
+    if supported_languages is None:
+        supported_languages = ['en', 'zh']
+
+    print("Select your language:")
+    for idx, code in enumerate(supported_languages, 1):
+        print(f"{idx}. {code}")
+
+    while True:
+        choice = input("Enter number or language code (e.g. 1 or 'en'): ").strip().lower()
+        print()
+
+
+        if choice.isdigit():
+            idx = int(choice) - 1
+            if 0 <= idx < len(supported_languages):
+                return supported_languages[idx]
+        elif choice in supported_languages:
+            return choice
+
+        print("Invalid input. Please try again.")
+
+def _(text):
+    return translations.get(lang, {}).get(text, text)
+
+
+lang = select_language()
+
+
 def main(args):
+    private_key = None
     port = int(args[0]) if len(args) > 0 else 4321
     address = args[1] if len(args) > 1 else "localhost"
 
@@ -59,7 +109,7 @@ def main(args):
                     match convert_bytes_to_int(read_bytes(client_socket, 8)):
                         case 0:
                             # If the packet is for transferring the filename
-                            print("Receiving file...")
+                            print(_("Receiving File"))
                             filename_len = convert_bytes_to_int(
                                 read_bytes(client_socket, 8)
                             )
@@ -73,16 +123,16 @@ def main(args):
 
                             # Read the metadata
                             original_file_size = convert_bytes_to_int(read_bytes(client_socket, 8))
-                            print(f"Original file size: {original_file_size} bytes")
+                            print(_("Original File Size") + f"{original_file_size}")
                             
                             BLOCK_SIZE = 62
                             num_blocks = (original_file_size + BLOCK_SIZE-1)//BLOCK_SIZE
-                            print(f"Expecting {num_blocks} blocks")
+                            print(_("Expecting Block Size") +f"{num_blocks}")
                             decrypted_data = b''
                             encrypted_file_data = b''  # Store encrypted data for saving
+                            bytes_received = 0
                             
                             for block_num in range(num_blocks):
-                                print(f"Reading block {block_num + 1}/{num_blocks}")
                                 
                                 # Read one encrypted block (128 bytes)
                                 encrypted_block = read_bytes(client_socket, 128)
@@ -90,6 +140,7 @@ def main(args):
                                 
                                 try:
                                     # Decrypt the block using OAEP
+
                                     decrypted_block = private_key.decrypt(
                                         encrypted_block,
                                         padding.OAEP(
@@ -99,33 +150,48 @@ def main(args):
                                         )
                                     )
                                     decrypted_data += decrypted_block
+
+            
                                 except Exception as e:
-                                        print(f"Error decrypting block {block_num}: {e}")
+                                        print(_("Error Decrypting Block")+ f"{block_num}: {e}")
                                         break
+
+                                bytes_received += BLOCK_SIZE
+                                if bytes_received > original_file_size:
+                                    bytes_received = original_file_size  
+
+                                print_progress_bar(bytes_received, original_file_size, block_num + 1, num_blocks)
+                            print()
                             decrypted_data = decrypted_data[:original_file_size]
-                            recv_filename = "recv_" + filename.split("/")[-1]
-                            with open(f"recv_files/{recv_filename}", mode="wb") as fp:
-                                fp.write(decrypted_data)
+                            unzipped_folder = "recv_files"
+
+                            try:
+                                with zipfile.ZipFile(BytesIO(decrypted_data)) as zip_ref:
+                                    zip_ref.extractall(unzipped_folder)
+                                    print(_("Successfully Unzipped Files") + f"{unzipped_folder}")
+                            except zipfile.BadZipFile as e:
+                                print(_("Failed to Unzip") + f"{e}")
+                           
                             
                             enc_filename = "enc_"+ filename.split("/")[-1]
                             
                             with open(f"recv_files_enc/{enc_filename}", mode="wb") as fp:
                                 fp.write(encrypted_file_data)
                             
-                            print(f"Successfully decrypted and saved: {recv_filename}")
-                            print(f"Decrypted size: {len(decrypted_data)} bytes")
-                            print(f"Finished receiving file in {(time.time() - start_time)}s!")
+                            print(_("Sucessfully Decrypted") +f"{enc_filename}")
+                            print(_("Decrypted Size")+ f"{len(decrypted_data)} bytes")
+                            print(_("Finished Receiving File") +f"{(time.time() - start_time)}s!")
                             
 
                         case 2:
                             # Close the connection
                             # Python context used here so no need to explicitly close the socket
-                            print("Closing connection...")
+                            print(_("Closing Connection"))
                             s.close()
                             break
 
                         case 3:
-                            print("[MODE3] Starting authentication handshake...")
+                            print(_("Start Handshake"))
 
                             #READ THE MODE 3 GIVEN BY CLIENT
 
@@ -153,8 +219,8 @@ def main(args):
                                 cert_data = f.read()
                             client_socket.sendall(convert_int_to_bytes(len(cert_data)))
                             client_socket.sendall(cert_data)
-                            print("Server certificate begins with:\n", cert_data[:50])
-                            print("[MODE 3] Authentication data sent to client.")       
+                            print(_("Server Certificate") + f"\n", cert_data[:50])
+                            print(_("Authetication"))       
                             
 
 
@@ -164,7 +230,7 @@ def main(args):
 
 def handler(signal_received, frame):
     # Handle any cleanup here
-    print('SIGINT or CTRL-C detected. Exiting gracefully')
+    print(_("Exiting"))
     exit(0)
     
 if __name__ == "__main__":

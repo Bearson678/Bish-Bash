@@ -6,6 +6,8 @@ import time
 from datetime import datetime
 import secrets
 import traceback
+import zipfile
+import os
 
 from cryptography import x509
 from cryptography.exceptions import InvalidSignature
@@ -13,6 +15,7 @@ from cryptography.fernet import Fernet
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding
 from cryptography.hazmat.backends import default_backend
+from translations import translations
 
 
 def convert_int_to_bytes(x):
@@ -28,41 +31,41 @@ def convert_bytes_to_int(xbytes):
     """
     return int.from_bytes(xbytes, "big")
 
-def encrypt_file_in_blocks_oaep(filename, public_key):
-    """
-    Encrypts file data in blocks using RSA with OAEP padding
-    Max data block size: 62 bytes (128 - 66 padding bytes)
-    """
-    BLOCK_SIZE = 62  # Maximum data size per block with OAEP padding
-    
-    encrypted_blocks = []
-    
-    # Read and encrypt file in blocks
-    with open(filename, mode="rb") as fp:
 
-        while True:
-                # Read a block of data
-            data_block = fp.read(BLOCK_SIZE)
-                
-            if not data_block:
-                break  # End of file
-                
-                # Encrypt the block using RSA with OAEP padding
-            encrypted_block = public_key.encrypt(
-                data_block,
-                padding.OAEP(
-                    mgf=padding.MGF1(hashes.SHA256()),
-                    algorithm=hashes.SHA256(),
-                    label=None,
-                )
-            )
-                
-                # Each encrypted block will be exactly 128 bytes (1024 bits)
-            encrypted_blocks.append(encrypted_block)
-    
-    return encrypted_blocks
+def print_progress_bar(current, total, bar_length=40):
+    percent = current / total
+    filled_length = int(bar_length * percent)
+    bar = '=' * filled_length + ' ' * (bar_length - filled_length)
+    sys.stdout.write(f'\rProgress: [{bar}] {percent*100:.1f}%')
+    sys.stdout.flush()
+
+def select_language(supported_languages=None):
+    if supported_languages is None:
+        supported_languages = ['en', 'zh']
+
+    print("Select your language:")
+    for idx, code in enumerate(supported_languages, 1):
+        print(f"{idx}. {code}")
+
+    while True:
+        choice = input("Enter number or language code (e.g. 1 or 'en'): ").strip().lower()
+        print()
 
 
+        if choice.isdigit():
+            idx = int(choice) - 1
+            if 0 <= idx < len(supported_languages):
+                return supported_languages[idx]
+        elif choice in supported_languages:
+            return choice
+
+        print("Invalid input. Please try again.")
+
+def _(text):
+    return translations.get(lang, {}).get(text, text)
+
+
+lang = select_language()
 
 def main(args):
     port = int(args[0]) if len(args) > 0 else 4321
@@ -70,11 +73,11 @@ def main(args):
     start_time = time.time()
 
     # try:
-    print("Establishing connection to server...")
+    print(_("Establishing Connection"))
     # Connect to server
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.connect((server_address, port))
-        print("Connected")
+        print(_("Connected"))
         print("Generating auth message...", flush=True)
 
         nonce = secrets.token_bytes(32) # we are sending a nonce to ensure that server is alive
@@ -85,9 +88,9 @@ def main(args):
         timestamp_bytes = timestamp_int.to_bytes(8, 'big')
         
         nonce_message = nonce + timestamp_bytes
-        print("Sending mode 3...", flush=True)
+        print(_("Sending Mode 3"), flush=True)
         s.sendall(convert_int_to_bytes(3))
-        print("Sent mode 3", flush=True)
+        print(_("Sent Mode 3"), flush=True)
         s.sendall(convert_int_to_bytes(len(nonce_message)))
         s.sendall(nonce_message)
 
@@ -123,7 +126,7 @@ def main(args):
                     padding=padding.PKCS1v15(), # padding used by CA bot to sign the the server's csr
                     algorithm=server_cert.signature_hash_algorithm,
                 )
-                print("[AUTH SUCCESS] Server identity verified.\n")
+                print(_("Auth Success") + "\n")
                 server_public_key = server_cert.public_key()
                 #assert server_cert.not_valid_before <= datetime.utcnow() <= server_cert.not_valid_after
                 
@@ -138,16 +141,16 @@ def main(args):
                 
                 
         except InvalidSignature:
-            print("[AUTH FAILURE] Signature verification failed. Aborting.")
+            print(_("Auth Failure"))
             s.sendall(convert_int_to_bytes(2))
             return
         except Exception as e:
-            print("[ERROR] Exception during authentication:", e)
+            print(_("Auth Error"), e)
             traceback.print_exc()
             s.sendall(convert_int_to_bytes(2))
             return
 
-        print("SERVER IS AUTHENTICATED\n")
+        print(_("Server Authenticated") + "\n")
         
         session_key = Fernet.generate_key()
         fernet = Fernet(session_key)
@@ -166,12 +169,10 @@ def main(args):
         s.sendall(encrypted_session_key)  # M2
         
         while True:
-            filename = input(
-                "Enter a filename to send (enter -1 to exit):"
-            ).strip()
+            filename = input(_("Enter File")).strip()
 
             while filename != "-1" and (not pathlib.Path(filename).is_file()):
-                filename = input("Invalid filename. Please try again:").strip()
+                filename = input(_("Invalid File")).strip()
 
             if filename == "-1":
                 s.sendall(convert_int_to_bytes(2))
@@ -203,25 +204,38 @@ def main(args):
                 for block in encrypted_blocks:
                     fp.write(block)
             
-            print(f"Encrypted file saved")
+            print(_("Encrypted File Saved"))
             
-                # Send encrypted file data (MODE = 1)
-            s.sendall(convert_int_to_bytes(1))  # MODE 1
-            s.sendall(convert_int_to_bytes(original_file_size))  # M1 = original file size
 
-            for encrypted_block in encrypted_blocks:
-                # Send each encrypted block prefixed with its length
-                s.sendall(convert_int_to_bytes(len(encrypted_block)))  # send length of block
-                s.sendall(encrypted_block)  # send actual encrypted data
+            total_bytes = original_file_size
+            bytes_sent = 0
+
+            s.sendall(convert_int_to_bytes(1))
+            s.sendall(convert_int_to_bytes(original_file_size))
+            for i, encrypted_block in enumerate(encrypted_blocks):
+                # original plaintext block size:
+                if i < len(encrypted_blocks) - 1:
+                    plaintext_block_size = block_size  # 128 bytes for all but last block
+                else:
+                    # last block may be smaller
+                    plaintext_block_size = len(data) - (block_size * (len(encrypted_blocks) - 1))
+                s.sendall(convert_int_to_bytes(len(encrypted_block)))  # length of encrypted block
+                s.sendall(encrypted_block)
+
+                bytes_sent += plaintext_block_size
+                if bytes_sent > total_bytes:
+                    bytes_sent = total_bytes
+                print_progress_bar(bytes_sent, total_bytes)
+            print()  
 
                 
-            print(f"Sent file with {len(encrypted_blocks)} encrypted blocks, original size: {original_file_size} bytes")
+            print(_("Sent File") +  f"{len(encrypted_blocks)}" + _("Encrypted blocks") + f"{original_file_size} bytes")
             # Close the connection
         s.sendall(convert_int_to_bytes(2))
-        print("Closing connection...")
+        print(_("Closing Connection"))
 
     end_time = time.time()
-    print(f"Program took {end_time - start_time}s to run.")
+    print(_("Program Run Time") + f"{end_time - start_time}s")
 
 
 if __name__ == "__main__":

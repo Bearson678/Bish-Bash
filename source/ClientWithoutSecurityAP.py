@@ -12,6 +12,7 @@ from cryptography.fernet import Fernet
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding
 from cryptography.hazmat.backends import default_backend
+from translations import translations
 
 
 def convert_int_to_bytes(x):
@@ -27,6 +28,33 @@ def convert_bytes_to_int(xbytes):
     """
     return int.from_bytes(xbytes, "big")
 
+def select_language(supported_languages=None):
+    if supported_languages is None:
+        supported_languages = ['en', 'zh']
+
+    print("Select your language:")
+    for idx, code in enumerate(supported_languages, 1):
+        print(f"{idx}. {code}")
+
+    while True:
+        choice = input("Enter number or language code (e.g. 1 or 'en'): ").strip().lower()
+        print()
+
+
+        if choice.isdigit():
+            idx = int(choice) - 1
+            if 0 <= idx < len(supported_languages):
+                return supported_languages[idx]
+        elif choice in supported_languages:
+            return choice
+
+        print("Invalid input. Please try again.")
+
+def _(text):
+    return translations.get(lang, {}).get(text, text)
+
+
+lang = select_language()
 
 def main(args):
     port = int(args[0]) if len(args) > 0 else 4321
@@ -35,11 +63,11 @@ def main(args):
     start_time = time.time()
 
     # try:
-    print("Establishing connection to server...")
+    print(_("Establishing Connection"))
     # Connect to server
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.connect((server_address, port))
-        print("Connected")
+        print(_("Connected"))
         print("Generating auth message...", flush=True)
 
         nonce = secrets.token_bytes(32) # we are sending a nonce to ensure that server is alive
@@ -50,9 +78,9 @@ def main(args):
         timestamp_bytes = timestamp_int.to_bytes(8, 'big')
         
         nonce_message = nonce + timestamp_bytes
-        print("Sending mode 3...", flush=True)
+        print(_("Sending Mode 3"), flush=True)
         s.sendall(convert_int_to_bytes(3))
-        print("Sent mode 3", flush=True)
+        print(_("Sent Mode 3"), flush=True)
         s.sendall(convert_int_to_bytes(len(nonce_message)))
         s.sendall(nonce_message)
 
@@ -88,7 +116,7 @@ def main(args):
                     padding=padding.PKCS1v15(), # padding used by CA bot to sign the the server's csr
                     algorithm=server_cert.signature_hash_algorithm,
                 )
-                print("[AUTH SUCCESS] Server identity verified.\n")
+                print(_("Auth Success") + "\n")
                 server_public_key = server_cert.public_key()
                 #assert server_cert.not_valid_before <= datetime.utcnow() <= server_cert.not_valid_after
                 
@@ -103,26 +131,24 @@ def main(args):
                 
                 
         except InvalidSignature:
-            print("[AUTH FAILURE] Signature verification failed. Aborting.")
+            print(_("Auth Failure"))
             s.sendall(convert_int_to_bytes(2))
             return
         except Exception as e:
-            print("[ERROR] Exception during authentication:", e)
+            print(_("Auth Error"), e)
             traceback.print_exc()
             s.sendall(convert_int_to_bytes(2))
             return
 
-        print("SERVER IS AUTHENTICATED\n")
+        print(_("Server Authenticated") + "\n")
         
         
         
         while True:
-            filename = input(
-                "Enter a filename to send (enter -1 to exit):"
-            ).strip()
+            filename = input(_("Enter File")).strip()
 
             while filename != "-1" and (not pathlib.Path(filename).is_file()):
-                filename = input("Invalid filename. Please try again:").strip()
+                filename = input(_("Invalid File")).strip()
 
             if filename == "-1":
                 s.sendall(convert_int_to_bytes(2))
@@ -144,10 +170,10 @@ def main(args):
 
         # Close the connection
         s.sendall(convert_int_to_bytes(2))
-        print("Closing connection...")
+        print(_("Closing Connection"))
 
     end_time = time.time()
-    print(f"Program took {end_time - start_time}s to run.")
+    print(_("Program Run Time") + f"{end_time - start_time}s")
 
 
 if __name__ == "__main__":
