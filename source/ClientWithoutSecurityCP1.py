@@ -123,7 +123,7 @@ def main(args):
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.connect((server_address, port))
         print(_("Connected"))
-        print("Generating auth message...", flush=True)
+        print(_("Generating auth message"), flush=True)
 
         nonce = secrets.token_bytes(32) # we are sending a nonce to ensure that server is alive
         

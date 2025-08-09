@@ -1,84 +1,61 @@
-[![Review Assignment Due Date](https://classroom.github.com/assets/deadline-readme-button-22041afd0340ce965d47ae6ef1cefeee28c7c493a6346c4f15d667ab976d596c.svg)](https://classroom.github.com/a/7xa7pSEd)
 # 50.005 Programming Assignment 2
 
-This assignment requires knowledge from Network Security and basic knowledge in Python.
+## How to setup and run the code
+1. ensure you have `> python 3.10` installed as well as `pipenv`
+2. open 2 seperate terminals, and start the virtual environemnt using `pipenv shell`
+3. on one terminal, run `python3 source/ServerWithoutSecurity.py`
+4. in  the other terminal, run `python3 source/ClientWithoutSecurity.py`
+5. you can now send messages from the client to the server 
 
-## Secure FTP != HTTPs
 
-Note that you will be implementing Secure FTP as your own whole new application layer protocol. In NO WAY we are relying on HTTP/s. Please do not confuse the materials, you don't need to know materials in Week 11 and 12 before getting started.
+## Sustainability
 
-## Running the code
+### Zip Feature
+We realised that especially CP1, the asymmetric key autshentication caused file transfers to be extremely slow, so we decided to reduce file size by `zipping it`. The client will zip the file before encrypting it, and the server will first decrypt the zip file before its contents are unzipped. 
 
-### Install required modules
 
-This assignment requires Python >3.10 to run.
+>__Test statistics__
+>
+>We tested on the biggest file `image.ppm`
+>
+>Original ~240s, with Zip ~9.59s 
 
-You can use `pipenv` to create a new virtual environment and install your modules there. If you don't have it, simply install using pip, (assuming your python is aliased as python3):
 
-```
-python3 -m pip install pipenv
-```
+### Progress Bar
+We introduced a progress bar in `both client and server` to allow user to know how fast and how much their file has been sent. As the file is sent, the progres bar will fill up.
 
-Then start the virtual environment, upgrade pip, and install the required modules:
+> Progress: [========================================] 100.0%
 
-```
-pipenv shell
-python -m ensurepip --upgrade
-pip install -r requirements.txt
-```
 
-If `ensurepip` is not available, you need to install it, e.g with Ubuntu:
+## Inclusivity 
 
-```
-# Adjust for your python version
-sudo apt-get install python3.10-venv
-```
+### Language support
+Everytime the user launches `either the server or client`, they will be prompted to choose their language. The server and client can have `different languages`.
+>__Select your language:__
+>
+>1. en (english)
+>2. zh (chinese)
+>
+>__Enter number or language code (e.g. 1 or 'en'):__ 2
 
-### Run `./setup.sh`
+This setting will be `applied to the protocol messages`, faciliating easy understanding of the authentication. 
 
-Run this in the root project directory:
+example
 
-```
-chmod +x ./setup.sh
-./setup.sh
-```
+<pre>
+正在建立与服务器的连接...
+已连接
+正在发送模式 3...
+正在发送模式 3...
+[身份验证成功] 服务器身份已验证
 
-This will create 3 directories: `/recv_files`, `/recv_files_enc`, and `/send_files_enc` in project's root. They are all empty directories that can't be added in `.git`.
+服务器已验证
 
-### Run server and client files
-
-In two separate shell sessions, run (assuming you're in root project directory):
-
-```
-python3 source/ServerWithoutSecurity.py
-```
-
-and:
-
-```
-python3 source/ClientWithoutSecurity.py
-```
-
-### Using different machines
-
-You can also host the Server file in another computer:
-
-```sh
-python3 source/ServerWithoutSecurity.py [PORT] 0.0.0.0
-```
-
-The client computer can connect to it using the command:
-
-```sh
-python3 source/ClientWithoutSecurity.py [PORT] [SERVER-IP-ADDRESS]
-```
-
-### Exiting pipenv shell
-
-To exit pipenv shell, simply type:
-
-```
-exit
-```
-
-Do not forget to spawn the shell again if you'd like to restart the assignment.
+输入要发送的文件名（输入 -1 退出）：files/week9.html
+原始文件大小 740390 bytes
+压缩文件大小 : 154951 bytes
+加密文件已保存
+ 进度: [========================================] 100.0%
+文件已发送，包含 2500加密块，新大小： 154951 bytes
+输入要发送的文件名（输入 -1 退出）：
+</pre>

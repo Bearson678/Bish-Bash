@@ -180,7 +180,7 @@ def main(args):
                             
                             print(_("Sucessfully Decrypted") +f"{enc_filename}")
                             print(_("Decrypted Size")+ f"{len(decrypted_data)} bytes")
-                            print(_("Finished Receiving File") +f"{(time.time() - start_time)}s!")
+                            print(_("Finished Recieving File") +f"{(time.time() - start_time)}s!")
                             
 
                         case 2:
