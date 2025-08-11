@@ -69,7 +69,8 @@ lang = select_language()
 
 def main(args):
     port = int(args[0]) if len(args) > 0 else 4321
-    server_address = args[1] if len(args) > 1 else "192.168.56.1"
+    server_address = args[1] if len(args) > 1 else "localhost"
+    print(server_address)
     start_time = time.time()
 
     # try:
