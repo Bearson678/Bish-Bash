@@ -69,7 +69,7 @@ lang = select_language()
 
 def main(args):
     port = int(args[0]) if len(args) > 0 else 4321
-    server_address = args[1] if len(args) > 1 else "192.168.56.1"
+    server_address = args[1] if len(args) > 1 else "0.0.0.0"
     start_time = time.time()
 
     # try:
@@ -178,7 +178,12 @@ def main(args):
                 s.sendall(convert_int_to_bytes(2))
                 break
 
-            filename_bytes = bytes(filename, encoding="utf8")
+            zip_file = "data.zip"
+
+            with zipfile.ZipFile(zip_file,"w",compression=zipfile.ZIP_DEFLATED) as zipf:
+                    zipf.write(filename)
+
+            filename_bytes = bytes(zip_file, encoding="utf8")
 
             # Send the filename
             s.sendall(convert_int_to_bytes(0))
@@ -187,7 +192,7 @@ def main(args):
 
             #Encrypt this part under CP1
             # Send the file
-            with open(filename, mode="rb") as fp:
+            with open(zip_file, mode="rb") as fp:
                 data = fp.read()
                 original_file_size = len(data)
                 encrypted_filename = "enc_"+filename.split("/")[-1]
